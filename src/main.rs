@@ -7,15 +7,17 @@ use std::io::Write;
 use std::net::{IpAddr, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
-use std::thread;
 use std::time::Instant;
+use std::sync::Mutex;
 
 use serde::Deserialize;
-use serde_yaml::Value;
 use serde_yaml::Value as YamlValue;
 
 use chrono::Local;
+
 use indicatif::{ProgressBar, ProgressStyle};
+
+use threadpool::ThreadPool;
 
 mod localisator;
 
@@ -119,12 +121,12 @@ fn scan_port(
 /// * `path` - The path to the configuration file.
 ///
 /// # Returns
-/// A `HashMap<String, Value>` containing the parsed configuration.
+/// A `HashMap<String, YamlValue>` containing the parsed configuration.
 ///
-fn read_config(path: &str) -> HashMap<String, Value> {
+fn read_config(path: &str) -> HashMap<String, YamlValue> {
     match fs::read_to_string(path) {
         Ok(content) => {
-            serde_yaml::from_str::<HashMap<String, Value>>(&content).unwrap_or_else(|_| {
+            serde_yaml::from_str::<HashMap<String, YamlValue>>(&content).unwrap_or_else(|_| {
                 // Cannot localize these yet, as language has to be loaded from config
                 eprintln!("Failed to parse config file: {}", path);
                 std::process::exit(1);
@@ -270,7 +272,7 @@ fn load_signatures() -> Vec<Signature> {
 /// * `u16` - The end port.
 /// * `usize` - The maximum number of threads.
 ///
-fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, u16, u16, usize, String) {
+fn get_config(config: &HashMap<String, YamlValue>) -> (Arc<IpAddr>, u16, u16, usize, String) {
     // Load language early for error messages
     let language = match config.get("language").and_then(|v| v.as_str()) {
         Some(lang) => lang.to_string(),
@@ -345,6 +347,35 @@ fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, u16, u16, usize,
     (ip, start_port, end_port, max_threads, language)
 }
 
+/// Scan ports in parallel using a thread pool, updating the progress bar and returning open ports.
+fn scan_ports_parallel(
+    ip: Arc<IpAddr>,
+    ports: Vec<u16>,
+    signatures: Arc<Vec<Signature>>,
+    max_threads: usize,
+    pb: &ProgressBar,
+) -> Vec<(u16, Option<String>)> {
+    let pool = ThreadPool::new(max_threads);
+    let open_ports = Arc::new(Mutex::new(Vec::new()));
+    let progress = Arc::new(pb.clone());
+
+    for port in ports {
+        let ip = Arc::clone(&ip);
+        let signatures = Arc::clone(&signatures);
+        let open_ports = Arc::clone(&open_ports);
+        let progress = Arc::clone(&progress);
+        pool.execute(move || {
+            if let Some(res) = scan_port(ip, port, signatures) {
+                open_ports.lock().unwrap().push(res);
+            }
+            progress.inc(1);
+        });
+    }
+    pool.join();
+    let result = Arc::try_unwrap(open_ports).unwrap().into_inner().unwrap();
+    result
+}
+
 /// Main function to execute the port scanning logic.
 ///
 fn main() {
@@ -360,46 +391,16 @@ fn main() {
     let (ip, start_port, end_port, max_threads, _language) = get_config(&config);
     let signatures = Arc::new(load_signatures());
 
-    let ports: Vec<u16> = (start_port..=end_port).collect();
-    let chunk_size = (ports.len() / max_threads) + 1;
-
-    let pb = ProgressBar::new(ports.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
-            .expect(&localisator::get("error_progress_bar_template"))
-            .progress_chars("=>-"),
-    );
-
-    let mut handles = Vec::new();
-    let progress = Arc::new(pb);
-
-    for chunk in ports.chunks(chunk_size) {
-        let ip = Arc::clone(&ip);
-        let chunk = chunk.to_vec();
-        let signatures = Arc::clone(&signatures);
-        let progress = Arc::clone(&progress);
-        let handle = thread::spawn(move || {
-            let mut results = Vec::new();
-            for port in chunk {
-                if let Some(res) = scan_port(ip.clone(), port, Arc::clone(&signatures)) {
-                    results.push(res);
-                }
-                progress.inc(1);
-            }
-            results
-        });
-        handles.push(handle);
-    }
-
-    let mut open_ports = Vec::new();
-    for handle in handles {
-        match handle.join() {
-            Ok(ports) => open_ports.extend(ports),
-            Err(_) => eprintln!("{}", localisator::get("error_thread_panic")),
-        }
-    }
-    progress.finish_with_message("Scan complete");
+        let ports: Vec<u16> = (start_port..=end_port).collect();
+        let pb = ProgressBar::new(ports.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
+                .expect(&localisator::get("error_progress_bar_template"))
+                .progress_chars("=>-")
+        );
+        let open_ports = scan_ports_parallel(ip.clone(), ports, signatures.clone(), max_threads, &pb);
+        pb.finish_with_message(localisator::get("scan_complete"));
 
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
 
