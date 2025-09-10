@@ -2,7 +2,7 @@ use reqwest::blocking::Client;
 use reqwest::header::USER_AGENT;
 
 use std::collections::HashMap;
-use std::fs;
+use std::fmt;
 use std::io::Write;
 use std::net::{IpAddr, TcpStream};
 use std::path::Path;
@@ -116,36 +116,51 @@ fn scan_port(
     }
 }
 
+/// Custom error type for port explorer
+///
+enum ScanError {
+    Config(String),
+    Io(std::io::Error),
+}
+
+/// Display implementation for ScanError
+///
+impl fmt::Display for ScanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScanError::Config(msg) => write!(f, "Config error: {}", msg),
+            ScanError::Io(e) => write!(f, "IO error: {}", e),
+        }
+    }
+}
+
+/// Convert std::io::Error into ScanError
+///
+impl From<std::io::Error> for ScanError {
+    fn from(e: std::io::Error) -> Self {
+        ScanError::Io(e)
+    }
+}
+
 /// Read and parse the configuration file.
 /// # Arguments
 /// * `path` - The path to the configuration file.
 ///
 /// # Returns
-/// A `HashMap<String, YamlValue>` containing the parsed configuration.
+/// A `Result<HashMap<String, Value>, ScanError>` containing the parsed configuration.
 ///
-fn read_config(path: &str) -> HashMap<String, YamlValue> {
-    match fs::read_to_string(path) {
-        Ok(content) => {
-            serde_yaml::from_str::<HashMap<String, YamlValue>>(&content).unwrap_or_else(|_| {
-                // Cannot localize these yet, as language has to be loaded from config
-                eprintln!("Failed to parse config file: {}", path);
-                std::process::exit(1);
-            })
-        }
-        Err(_) => {
-            // Cannot localize these yet, as language has to be loaded from config
-            eprintln!("Config file not found: {}", path);
-            std::process::exit(1);
-        }
-    }
+fn read_config(path: &str) -> Result<HashMap<String, YamlValue>, ScanError> {
+    let content = std::fs::read_to_string(path)?;
+    serde_yaml::from_str::<HashMap<String, YamlValue>>(&content)
+        .map_err(|e| ScanError::Config(e.to_string()))
 }
 
 /// Load all signatures from YAML files in the "signatures" directory.
 ///
 /// # Returns
-/// A vector of `Signature` structs containing all loaded signatures.
+/// A `Result<Vec<Signature>, ScanError>` containing the loaded signatures.
 ///
-fn load_signatures() -> Vec<Signature> {
+fn load_signatures() -> Result<Vec<Signature>, ScanError> {
     /// Process a YAML value to extract signatures.
     ///
     /// # Arguments
@@ -250,15 +265,16 @@ fn load_signatures() -> Vec<Signature> {
     let mut results = Vec::new();
     let base = Path::new("signatures");
     if !base.exists() {
-        eprintln!("{}", localisator::get("error_signatures_dir_not_found"));
-        return results;
+        return Err(ScanError::Config(localisator::get(
+            "error_signatures_dir_not_found",
+        )));
     }
 
     walk(base, &mut results);
 
     results.sort_by(|a, b| a.name.cmp(&b.name).then(a.match_.cmp(&b.match_)));
     results.dedup_by(|a, b| a.name == b.name && a.match_ == b.match_);
-    results
+    Ok(results)
 }
 
 /// Extract and validate configuration parameters.
@@ -272,7 +288,9 @@ fn load_signatures() -> Vec<Signature> {
 /// * `u16` - The end port.
 /// * `usize` - The maximum number of threads.
 ///
-fn get_config(config: &HashMap<String, YamlValue>) -> (Arc<IpAddr>, u16, u16, usize, String) {
+fn get_config(
+    config: &HashMap<String, YamlValue>,
+) -> Result<(Arc<IpAddr>, u16, u16, usize, String), ScanError> {
     // Load language early for error messages
     let language = match config.get("language").and_then(|v| v.as_str()) {
         Some(lang) => lang.to_string(),
@@ -281,14 +299,10 @@ fn get_config(config: &HashMap<String, YamlValue>) -> (Arc<IpAddr>, u16, u16, us
     // Init Localisator early, to provide error messages in the correct language
     localisator::init(&language);
     let ip: IpAddr = match config.get("ip").and_then(|v| v.as_str()) {
-        Some(ip) => ip.parse().unwrap_or_else(|_| {
-            eprintln!("{}", localisator::get("error_invalid_ip"));
-            std::process::exit(1);
-        }),
-        None => {
-            eprintln!("{}", localisator::get("error_ip_not_found"));
-            std::process::exit(1);
-        }
+        Some(ip) => ip
+            .parse()
+            .map_err(|_| ScanError::Config(localisator::get("error_invalid_ip")))?,
+        None => return Err(ScanError::Config(localisator::get("error_ip_not_found"))),
     };
     let ip = Arc::new(ip);
 
@@ -297,8 +311,7 @@ fn get_config(config: &HashMap<String, YamlValue>) -> (Arc<IpAddr>, u16, u16, us
             if port > 65535 {
                 let msg =
                     localisator::get("error_start_port_range").replace("{port}", &port.to_string());
-                eprintln!("{}", msg);
-                std::process::exit(1);
+                return Err(ScanError::Config(msg));
             }
             port as u16
         }
@@ -310,8 +323,7 @@ fn get_config(config: &HashMap<String, YamlValue>) -> (Arc<IpAddr>, u16, u16, us
             if port > 65535 {
                 let msg =
                     localisator::get("error_end_port_range").replace("{port}", &port.to_string());
-                eprintln!("{}", msg);
-                std::process::exit(1);
+                return Err(ScanError::Config(msg));
             }
             port as u16
         }
@@ -322,8 +334,7 @@ fn get_config(config: &HashMap<String, YamlValue>) -> (Arc<IpAddr>, u16, u16, us
         let msg = localisator::get("error_start_gt_end")
             .replace("{start}", &start_port.to_string())
             .replace("{end}", &end_port.to_string());
-        eprintln!("{}", msg);
-        std::process::exit(1);
+        return Err(ScanError::Config(msg));
     }
 
     let max_threads = match config.get("max_threads").and_then(|v| v.as_u64()) {
@@ -331,20 +342,18 @@ fn get_config(config: &HashMap<String, YamlValue>) -> (Arc<IpAddr>, u16, u16, us
             if threads <= 0 {
                 let msg = localisator::get("error_max_threads_zero")
                     .replace("{threads}", &threads.to_string());
-                eprintln!("{}", msg);
-                std::process::exit(1);
+                return Err(ScanError::Config(msg));
             }
             if threads > 1000 {
                 let msg = localisator::get("error_max_threads_high")
                     .replace("{threads}", &threads.to_string());
-                eprintln!("{}", msg);
-                std::process::exit(1);
+                return Err(ScanError::Config(msg));
             }
             threads as usize
         }
         None => 100,
     };
-    (ip, start_port, end_port, max_threads, language)
+    Ok((ip, start_port, end_port, max_threads, language))
 }
 
 /// Scan ports in parallel using a thread pool, updating the progress bar and returning open ports.
@@ -365,7 +374,7 @@ fn scan_ports_parallel(
     signatures: Arc<Vec<Signature>>,
     max_threads: usize,
     pb: &ProgressBar,
-) -> Vec<(u16, Option<String>)> {
+) -> Result<Vec<(u16, Option<String>)>, ScanError> {
     let pool = ThreadPool::new(max_threads);
     let open_ports = Arc::new(Mutex::new(Vec::new()));
     let progress = Arc::new(pb.clone());
@@ -384,7 +393,7 @@ fn scan_ports_parallel(
     }
     pool.join();
     let result = Arc::try_unwrap(open_ports).unwrap().into_inner().unwrap();
-    result
+    Ok(result)
 }
 
 /// Main function to execute the port scanning logic.
@@ -398,9 +407,27 @@ fn main() {
         "config.yaml"
     };
 
-    let config = read_config(config_path);
-    let (ip, start_port, end_port, max_threads, _language) = get_config(&config);
-    let signatures = Arc::new(load_signatures());
+    let config = match read_config(config_path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    };
+    let (ip, start_port, end_port, max_threads, _language) = match get_config(&config) {
+        Ok(vals) => vals,
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    };
+    let signatures = match load_signatures() {
+        Ok(sigs) => Arc::new(sigs),
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    };
 
     let ports: Vec<u16> = (start_port..=end_port).collect();
     let pb = ProgressBar::new(ports.len() as u64);
@@ -410,7 +437,14 @@ fn main() {
                 .expect(&localisator::get("error_progress_bar_template"))
                 .progress_chars("=>-")
         );
-    let open_ports = scan_ports_parallel(ip.clone(), ports, signatures.clone(), max_threads, &pb);
+    let open_ports =
+        match scan_ports_parallel(ip.clone(), ports, signatures.clone(), max_threads, &pb) {
+            Ok(ports) => ports,
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        };
     pb.finish_with_message(localisator::get("scan_complete"));
 
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
