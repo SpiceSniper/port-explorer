@@ -7,20 +7,39 @@ use std::net::{IpAddr, TcpStream};
 use std::sync::Arc;
 use std::thread;
 
-use serde_yaml::Value;
 use serde::Deserialize;
+use serde_yaml::Value;
 
+/// Signature structure for service identification
+///
+/// # Fields:
+/// * 'name' - Name of the service (e.g., "Apache", "nginx")
+/// * 'match_' - Substring to match in the service response for identification
+///
 #[derive(Debug, Deserialize, Clone)]
 struct Signature {
     name: String,
     match_: String,
 }
 
+/// Container for multiple signatures loaded from a YAML file
+///
+/// # Fields:
+/// * 'signatures' - A list of service signatures
+///
 #[derive(Debug, Deserialize)]
 struct SignatureFile {
     signatures: Vec<Signature>,
 }
 
+/// Format a `std::time::Duration` into a human-readable string.
+///
+/// # Arguments
+/// * `duration` - The duration to format.
+///
+/// # Returns
+/// A formatted string representing the duration in the largest appropriate units.
+///
 fn format_duration(duration: std::time::Duration) -> String {
     let total_ms = duration.as_millis();
     let total_ns = duration.as_nanos();
@@ -41,6 +60,16 @@ fn format_duration(duration: std::time::Duration) -> String {
         format!("{}ns", total_ns)
     }
 }
+
+/// Identify the service based on response content and known signatures.
+///
+/// # Arguments
+/// * `response` - The response string to analyze.
+/// * `signatures` - A list of known service signatures.
+///
+/// # Returns
+/// An `Option<String>` containing the service name if identified, or `None` if not identified.
+///
 fn identify_service(response: &str, signatures: &[Signature]) -> Option<String> {
     for sig in signatures {
         if response.contains(&sig.match_) {
@@ -50,7 +79,21 @@ fn identify_service(response: &str, signatures: &[Signature]) -> Option<String> 
     None
 }
 
-fn scan_port(ip: Arc<IpAddr>, port: u16, signatures: Arc<Vec<Signature>>) -> Option<(u16, Option<String>)> {
+/// Scan a single port on the given IP address.
+///
+/// # Arguments
+/// * `ip` - The target IP address.
+/// * `port` - The port number to scan.
+/// * `signatures` - A list of known service signatures for identification.
+///
+/// # Returns
+/// An `Option<(u16, Option<String>)>` containing the port number and the service name if identified, or `None` if not identified.
+///
+fn scan_port(
+    ip: Arc<IpAddr>,
+    port: u16,
+    signatures: Arc<Vec<Signature>>,
+) -> Option<(u16, Option<String>)> {
     let addr = std::net::SocketAddr::new(*ip, port);
     if TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(200)).is_ok() {
         // Try HTTP detection
@@ -59,9 +102,7 @@ fn scan_port(ip: Arc<IpAddr>, port: u16, signatures: Arc<Vec<Signature>>) -> Opt
             .timeout(std::time::Duration::from_secs(1))
             .build();
         if let Ok(client) = client {
-            if let Ok(resp) = client.get(&url)
-                .header(USER_AGENT, "port-explorer")
-                .send() {
+            if let Ok(resp) = client.get(&url).header(USER_AGENT, "port-explorer").send() {
                 if let Ok(text) = resp.text() {
                     let service = identify_service(&text, &signatures);
                     return Some((port, service));
@@ -74,6 +115,13 @@ fn scan_port(ip: Arc<IpAddr>, port: u16, signatures: Arc<Vec<Signature>>) -> Opt
     }
 }
 
+/// Read and parse the configuration file.
+/// # Arguments
+/// * `path` - The path to the configuration file.
+///
+/// # Returns
+/// A `HashMap<String, Value>` containing the parsed configuration.
+///
 fn read_config(path: &str) -> HashMap<String, Value> {
     match fs::read_to_string(path) {
         Ok(content) => {
@@ -81,7 +129,7 @@ fn read_config(path: &str) -> HashMap<String, Value> {
                 eprintln!("Failed to parse config file: {}", path);
                 std::process::exit(1);
             })
-        },
+        }
         Err(_) => {
             eprintln!("Config file not found: {}", path);
             std::process::exit(1);
@@ -89,6 +137,11 @@ fn read_config(path: &str) -> HashMap<String, Value> {
     }
 }
 
+/// Load all signatures from YAML files in the "signatures" directory.
+///
+/// # Returns
+/// A vector of `Signature` structs containing all loaded signatures.
+///
 fn load_signatures() -> Vec<Signature> {
     let mut all_signatures = Vec::new();
     if let Ok(entries) = fs::read_dir("signatures") {
@@ -108,7 +161,20 @@ fn load_signatures() -> Vec<Signature> {
     all_signatures
 }
 
-fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, Arc<Vec<Signature>>, u16, u16, usize) {
+/// Extract and validate configuration parameters.
+/// # Arguments
+/// * `config` - A reference to the configuration HashMap.
+///
+/// Returns a tuple containing:
+/// * `Arc<IpAddr>` - The target IP address.
+/// * `Arc<Vec<Signature>>` - The loaded service signatures.
+/// * `u16` - The start port.
+/// * `u16` - The end port.
+/// * `usize` - The maximum number of threads.
+///
+fn get_config(
+    config: &HashMap<String, Value>,
+) -> (Arc<IpAddr>, Arc<Vec<Signature>>, u16, u16, usize) {
     let ip: IpAddr = match config.get("ip").and_then(|v| v.as_str()) {
         Some(ip) => ip.parse().unwrap_or_else(|_| {
             eprintln!("Invalid IP address in config.");
@@ -120,9 +186,9 @@ fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, Arc<Vec<Signatur
         }
     };
     let ip = Arc::new(ip);
-    
+
     let signatures = Arc::new(load_signatures());
-    
+
     let start_port = match config.get("start_port").and_then(|v| v.as_u64()) {
         Some(port) => {
             if port > 65535 {
@@ -130,10 +196,10 @@ fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, Arc<Vec<Signatur
                 std::process::exit(1);
             }
             port as u16
-        },
-        None => 1
+        }
+        None => 1,
     };
-    
+
     let end_port = match config.get("end_port").and_then(|v| v.as_u64()) {
         Some(port) => {
             if port > 65535 {
@@ -141,15 +207,18 @@ fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, Arc<Vec<Signatur
                 std::process::exit(1);
             }
             port as u16
-        },
-        None => 65535
+        }
+        None => 65535,
     };
-    
+
     if start_port > end_port {
-        eprintln!("Start port {} cannot be greater than end port {}", start_port, end_port);
+        eprintln!(
+            "Start port {} cannot be greater than end port {}",
+            start_port, end_port
+        );
         std::process::exit(1);
     }
-    
+
     let max_threads = match config.get("max_threads").and_then(|v| v.as_u64()) {
         Some(threads) => {
             if threads == 0 {
@@ -161,15 +230,15 @@ fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, Arc<Vec<Signatur
                 std::process::exit(1);
             }
             threads as usize
-        },
-        None => 100
+        }
+        None => 100,
     };
     (ip, signatures, start_port, end_port, max_threads)
-    }
+}
 
-
+/// Main function to execute the port scanning logic.
+///
 fn main() {
-
     let scan_start = Instant::now();
     let args: Vec<String> = std::env::args().collect();
     let config_path = if args.len() > 1 {
@@ -190,7 +259,8 @@ fn main() {
         let chunk = chunk.to_vec();
         let signatures = Arc::clone(&signatures);
         let handle = thread::spawn(move || {
-            chunk.into_iter()
+            chunk
+                .into_iter()
                 .filter_map(|port| scan_port(ip.clone(), port, Arc::clone(&signatures)))
                 .collect::<Vec<(u16, Option<String>)>>()
         });
@@ -206,8 +276,8 @@ fn main() {
     }
 
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
-    use std::io::Write;
     use chrono::Local;
+    use std::io::Write;
     use std::time::Instant;
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
     let log_path = format!("logs/scan_{}.log", timestamp);
@@ -219,26 +289,29 @@ fn main() {
         }
     };
 
-        let scan_duration = scan_start.elapsed();
-        let scan_duration_str = format_duration(scan_duration);
+    let scan_duration = scan_start.elapsed();
+    let scan_duration_str = format_duration(scan_duration);
 
-        let header = format!(
-            "Scan started: {}\nPort range: {}-{}\nDuration: {}\nTarget: {}\n",
-            Local::now().format("%Y-%m-%d %H:%M:%S"),
-            start_port,
-            end_port,
-            scan_duration_str,
-            ip_str
+    let header = format!(
+        "Scan started: {}\nPort range: {}-{}\nDuration: {}\nTarget: {}\n",
+        Local::now().format("%Y-%m-%d %H:%M:%S"),
+        start_port,
+        end_port,
+        scan_duration_str,
+        ip_str
+    );
+    let _ = log.write_all(header.as_bytes());
+
+    let open_ports_count = open_ports.len();
+    if open_ports_count == 0 {
+        let msg = format!("No open ports found on {}\n", ip_str);
+        print!("{}", msg);
+        let _ = log.write_all(msg.as_bytes());
+        print!(
+            "Scanned ports: {}-{}\nDuration: {}\nOpen ports: 0\n",
+            start_port, end_port, scan_duration_str
         );
-        let _ = log.write_all(header.as_bytes());
-
-        let open_ports_count = open_ports.len();
-        if open_ports_count == 0 {
-            let msg = format!("No open ports found on {}\n", ip_str);
-            print!("{}", msg);
-            let _ = log.write_all(msg.as_bytes());
-            print!("Scanned ports: {}-{}\nDuration: {}\nOpen ports: 0\n", start_port, end_port, scan_duration_str);
-        } else {
+    } else {
         let ports_header = format!("Open ports on {}:\n", ip_str);
         print!("{}", ports_header);
         let _ = log.write_all(ports_header.as_bytes());
@@ -250,6 +323,9 @@ fn main() {
             print!("{}", line);
             let _ = log.write_all(line.as_bytes());
         }
-        print!("Scanned ports: {}-{}\nDuration: {}\nOpen ports: {}\n", start_port, end_port, scan_duration_str, open_ports_count);
+        print!(
+            "Scanned ports: {}-{}\nDuration: {}\nOpen ports: {}\n",
+            start_port, end_port, scan_duration_str, open_ports_count
+        );
     }
 }
