@@ -248,7 +248,7 @@ fn load_signatures() -> Vec<Signature> {
 ///
 fn get_config(
     config: &HashMap<String, Value>,
-) -> (Arc<IpAddr>, u16, u16, usize) {
+) -> (Arc<IpAddr>, u16, u16, usize, String) {
     let ip: IpAddr = match config.get("ip").and_then(|v| v.as_str()) {
         Some(ip) => ip.parse().unwrap_or_else(|_| {
             eprintln!("Invalid IP address in config.");
@@ -305,7 +305,11 @@ fn get_config(
         }
         None => 100,
     };
-    (ip, start_port, end_port, max_threads)
+    let language = match config.get("language").and_then(|v| v.as_str()) {
+        Some(lang) => lang.to_string(),
+        None => "en".to_string(),
+    };
+    (ip, start_port, end_port, max_threads, language)
 }
 
 /// Main function to execute the port scanning logic.
@@ -320,7 +324,7 @@ fn main() {
     };
 
     let config = read_config(config_path);
-    let (ip, start_port, end_port, max_threads) = get_config(&config);
+    let (ip, start_port, end_port, max_threads, language) = get_config(&config);
     let signatures = Arc::new(load_signatures());
 
     let mut handles = Vec::new();
