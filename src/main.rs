@@ -108,17 +108,7 @@ fn load_signatures() -> Vec<Signature> {
     all_signatures
 }
 
-fn main() {
-
-    let scan_start = Instant::now();
-    let args: Vec<String> = std::env::args().collect();
-    let config_path = if args.len() > 1 {
-        &args[1]
-    } else {
-        "config.yaml"
-    };
-
-    let config = read_config(config_path);
+fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, Arc<Vec<Signature>>, u16, u16, usize) {
     let ip: IpAddr = match config.get("ip").and_then(|v| v.as_str()) {
         Some(ip) => ip.parse().unwrap_or_else(|_| {
             eprintln!("Invalid IP address in config.");
@@ -130,12 +120,66 @@ fn main() {
         }
     };
     let ip = Arc::new(ip);
-
+    
     let signatures = Arc::new(load_signatures());
+    
+    let start_port = match config.get("start_port").and_then(|v| v.as_u64()) {
+        Some(port) => {
+            if port > 65535 {
+                eprintln!("Start port {} is out of range (1-65535)", port);
+                std::process::exit(1);
+            }
+            port as u16
+        },
+        None => 1
+    };
+    
+    let end_port = match config.get("end_port").and_then(|v| v.as_u64()) {
+        Some(port) => {
+            if port > 65535 {
+                eprintln!("End port {} is out of range (1-65535)", port);
+                std::process::exit(1);
+            }
+            port as u16
+        },
+        None => 65535
+    };
+    
+    if start_port > end_port {
+        eprintln!("Start port {} cannot be greater than end port {}", start_port, end_port);
+        std::process::exit(1);
+    }
+    
+    let max_threads = match config.get("max_threads").and_then(|v| v.as_u64()) {
+        Some(threads) => {
+            if threads == 0 {
+                eprintln!("Max threads cannot be zero");
+                std::process::exit(1);
+            }
+            if threads > 1000 {
+                eprintln!("Max threads {} is too high (maximum: 1000)", threads);
+                std::process::exit(1);
+            }
+            threads as usize
+        },
+        None => 100
+    };
+    (ip, signatures, start_port, end_port, max_threads)
+    }
 
-    let start_port = config.get("start_port").and_then(|v| v.as_u64()).unwrap_or(1) as u16;
-    let end_port = config.get("end_port").and_then(|v| v.as_u64()).unwrap_or(65535) as u16;
-    let max_threads = config.get("max_threads").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+
+fn main() {
+
+    let scan_start = Instant::now();
+    let args: Vec<String> = std::env::args().collect();
+    let config_path = if args.len() > 1 {
+        &args[1]
+    } else {
+        "config.yaml"
+    };
+
+    let config = read_config(config_path);
+    let (ip, signatures, start_port, end_port, max_threads) = get_config(&config);
 
     let mut handles = Vec::new();
     let ports: Vec<u16> = (start_port..=end_port).collect();
@@ -195,17 +239,17 @@ fn main() {
             let _ = log.write_all(msg.as_bytes());
             print!("Scanned ports: {}-{}\nDuration: {}\nOpen ports: 0\n", start_port, end_port, scan_duration_str);
         } else {
-            let ports_header = format!("Open ports on {}:\n", ip_str);
-            print!("{}", ports_header);
-            let _ = log.write_all(ports_header.as_bytes());
-            for (port, service) in &open_ports {
-                let line = match service {
-                    Some(name) => format!("{}: {}\n", port, name),
-                    None => format!("{}: open\n", port),
-                };
-                print!("{}", line);
-                let _ = log.write_all(line.as_bytes());
-            }
-            print!("Scanned ports: {}-{}\nDuration: {}\nOpen ports: {}\n", start_port, end_port, scan_duration_str, open_ports_count);
+        let ports_header = format!("Open ports on {}:\n", ip_str);
+        print!("{}", ports_header);
+        let _ = log.write_all(ports_header.as_bytes());
+        for (port, service) in &open_ports {
+            let line = match service {
+                Some(name) => format!("{}: {}\n", port, name),
+                None => format!("{}: open\n", port),
+            };
+            print!("{}", line);
+            let _ = log.write_all(line.as_bytes());
         }
+        print!("Scanned ports: {}-{}\nDuration: {}\nOpen ports: {}\n", start_port, end_port, scan_duration_str, open_ports_count);
+    }
 }
