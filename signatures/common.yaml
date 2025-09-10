@@ -53,3 +53,7 @@ signatures:
     match: "Redis"
   - name: "MongoDB"
     match: "MongoDB"
+  - name: "OpenSSH"
+    match: "OpenSSH"
+  - name: "Prowlarr"
+    match: "<title>Prowlarr"

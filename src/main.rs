@@ -6,9 +6,15 @@ use std::fs;
 use std::net::{IpAddr, TcpStream};
 use std::sync::Arc;
 use std::thread;
+use std::io::Write;
+use std::time::Instant;
+use std::path::Path;
 
 use serde::Deserialize;
 use serde_yaml::Value;
+use serde_yaml::Value as YamlValue;
+
+use chrono::Local;
 
 /// Signature structure for service identification
 ///
@@ -20,16 +26,6 @@ use serde_yaml::Value;
 struct Signature {
     name: String,
     match_: String,
-}
-
-/// Container for multiple signatures loaded from a YAML file
-///
-/// # Fields:
-/// * 'signatures' - A list of service signatures
-///
-#[derive(Debug, Deserialize)]
-struct SignatureFile {
-    signatures: Vec<Signature>,
 }
 
 /// Format a `std::time::Duration` into a human-readable string.
@@ -143,14 +139,82 @@ fn read_config(path: &str) -> HashMap<String, Value> {
 /// A vector of `Signature` structs containing all loaded signatures.
 ///
 fn load_signatures() -> Vec<Signature> {
-    let mut all_signatures = Vec::new();
-    if let Ok(entries) = fs::read_dir("signatures") {
-        for entry in entries.flatten() {
-            if let Some(extension) = entry.path().extension() {
-                if extension == "yaml" || extension == "yml" {
-                    if let Ok(content) = fs::read_to_string(entry.path()) {
-                        if let Ok(sig_file) = serde_yaml::from_str::<SignatureFile>(&content) {
-                            all_signatures.extend(sig_file.signatures);
+
+    /// Process a YAML value to extract signatures.
+    /// 
+    /// # Arguments
+    /// * `val` - The YAML value to process.
+    /// * `out` - A mutable reference to the output vector of signatures.
+    ///
+    fn process_value(val: YamlValue, out: &mut Vec<Signature>) {
+        match val {
+            YamlValue::Mapping(map) => {
+                // If there's a "signatures" key with a sequence
+                if let Some(seq) = map.get(&YamlValue::from("signatures")).and_then(|v| v.as_sequence()) {
+                    for item in seq {
+                        if let Some(m) = item.as_mapping() {
+                            let name = m.get(&YamlValue::from("name")).and_then(|v| v.as_str());
+                            let match_str = m.get(&YamlValue::from("match_")).and_then(|v| v.as_str())
+                                .or_else(|| m.get(&YamlValue::from("match")).and_then(|v| v.as_str()));
+                            if let (Some(n), Some(ms)) = (name, match_str) {
+                                out.push(Signature {
+                                    name: n.to_string(),
+                                    match_: ms.to_string(),
+                                });
+                            }
+                        }
+                    }
+                    return;
+                }
+                // Otherwise treat as name -> match mapping
+                for (k, v) in map {
+                    if let (Some(name), Some(ms)) = (k.as_str(), v.as_str()) {
+                        out.push(Signature {
+                            name: name.to_string(),
+                            match_: ms.to_string(),
+                        });
+                    }
+                }
+            }
+            YamlValue::Sequence(seq) => {
+                for item in seq {
+                    if let Some(m) = item.as_mapping() {
+                        let name = m.get(&YamlValue::from("name")).and_then(|v| v.as_str());
+                        let match_str = m.get(&YamlValue::from("match_")).and_then(|v| v.as_str())
+                            .or_else(|| m.get(&YamlValue::from("match")).and_then(|v| v.as_str()));
+                        if let (Some(n), Some(ms)) = (name, match_str) {
+                            out.push(Signature {
+                                name: n.to_string(),
+                                match_: ms.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Recursively walk through the directory to find YAML files.
+    /// 
+    /// # Arguments
+    /// * `dir` - The directory path to walk.
+    /// * `out` - A mutable reference to the output vector of signatures.
+    ///
+    fn walk(dir: &Path, out: &mut Vec<Signature>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml") {
+                        match std::fs::read_to_string(&path) {
+                            Ok(content) => match serde_yaml::from_str::<YamlValue>(&content) {
+                                Ok(val) => process_value(val, out),
+                                Err(e) => eprintln!("Failed to parse YAML {:?}: {}", path, e),
+                            },
+                            Err(e) => eprintln!("Failed to read file {:?}: {}", path, e),
                         }
                     }
                 }
@@ -158,7 +222,18 @@ fn load_signatures() -> Vec<Signature> {
         }
     }
 
-    all_signatures
+    let mut results = Vec::new();
+    let base = Path::new("signatures");
+    if !base.exists() {
+        eprintln!("Signatures directory not found: {:?}", base);
+        return results;
+    }
+
+    walk(base, &mut results);
+
+    results.sort_by(|a, b| a.name.cmp(&b.name).then(a.match_.cmp(&b.match_)));
+    results.dedup_by(|a, b| a.name == b.name && a.match_ == b.match_);
+    results
 }
 
 /// Extract and validate configuration parameters.
@@ -167,14 +242,13 @@ fn load_signatures() -> Vec<Signature> {
 ///
 /// Returns a tuple containing:
 /// * `Arc<IpAddr>` - The target IP address.
-/// * `Arc<Vec<Signature>>` - The loaded service signatures.
 /// * `u16` - The start port.
 /// * `u16` - The end port.
 /// * `usize` - The maximum number of threads.
 ///
 fn get_config(
     config: &HashMap<String, Value>,
-) -> (Arc<IpAddr>, Arc<Vec<Signature>>, u16, u16, usize) {
+) -> (Arc<IpAddr>, u16, u16, usize) {
     let ip: IpAddr = match config.get("ip").and_then(|v| v.as_str()) {
         Some(ip) => ip.parse().unwrap_or_else(|_| {
             eprintln!("Invalid IP address in config.");
@@ -186,8 +260,6 @@ fn get_config(
         }
     };
     let ip = Arc::new(ip);
-
-    let signatures = Arc::new(load_signatures());
 
     let start_port = match config.get("start_port").and_then(|v| v.as_u64()) {
         Some(port) => {
@@ -233,7 +305,7 @@ fn get_config(
         }
         None => 100,
     };
-    (ip, signatures, start_port, end_port, max_threads)
+    (ip, start_port, end_port, max_threads)
 }
 
 /// Main function to execute the port scanning logic.
@@ -248,7 +320,8 @@ fn main() {
     };
 
     let config = read_config(config_path);
-    let (ip, signatures, start_port, end_port, max_threads) = get_config(&config);
+    let (ip, start_port, end_port, max_threads) = get_config(&config);
+    let signatures = Arc::new(load_signatures());
 
     let mut handles = Vec::new();
     let ports: Vec<u16> = (start_port..=end_port).collect();
@@ -276,9 +349,7 @@ fn main() {
     }
 
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
-    use chrono::Local;
-    use std::io::Write;
-    use std::time::Instant;
+    
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
     let log_path = format!("logs/scan_{}.log", timestamp);
     let mut log = match std::fs::File::create(&log_path) {
