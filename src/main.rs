@@ -7,8 +7,8 @@ use std::io::Write;
 use std::net::{IpAddr, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use serde::Deserialize;
 use serde_yaml::Value as YamlValue;
@@ -348,6 +348,17 @@ fn get_config(config: &HashMap<String, YamlValue>) -> (Arc<IpAddr>, u16, u16, us
 }
 
 /// Scan ports in parallel using a thread pool, updating the progress bar and returning open ports.
+///
+/// # Arguments
+/// * `ip` - The target IP address.
+/// * `ports` - A vector of port numbers to scan.
+/// * `signatures` - A list of known service signatures for identification.
+/// * `max_threads` - The maximum number of threads to use.
+/// * `pb` - A reference to the progress bar to update.
+///
+/// # Returns
+/// A vector of tuples containing open port numbers and their identified services (if any).
+///
 fn scan_ports_parallel(
     ip: Arc<IpAddr>,
     ports: Vec<u16>,
@@ -391,16 +402,16 @@ fn main() {
     let (ip, start_port, end_port, max_threads, _language) = get_config(&config);
     let signatures = Arc::new(load_signatures());
 
-        let ports: Vec<u16> = (start_port..=end_port).collect();
-        let pb = ProgressBar::new(ports.len() as u64);
-        pb.set_style(
+    let ports: Vec<u16> = (start_port..=end_port).collect();
+    let pb = ProgressBar::new(ports.len() as u64);
+    pb.set_style(
             ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
                 .expect(&localisator::get("error_progress_bar_template"))
                 .progress_chars("=>-")
         );
-        let open_ports = scan_ports_parallel(ip.clone(), ports, signatures.clone(), max_threads, &pb);
-        pb.finish_with_message(localisator::get("scan_complete"));
+    let open_ports = scan_ports_parallel(ip.clone(), ports, signatures.clone(), max_threads, &pb);
+    pb.finish_with_message(localisator::get("scan_complete"));
 
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
 
