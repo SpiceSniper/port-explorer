@@ -3,18 +3,20 @@ use reqwest::header::USER_AGENT;
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::net::{IpAddr, TcpStream};
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
-use std::io::Write;
 use std::time::Instant;
-use std::path::Path;
 
 use serde::Deserialize;
 use serde_yaml::Value;
 use serde_yaml::Value as YamlValue;
 
 use chrono::Local;
+
+mod localisator;
 
 /// Signature structure for service identification
 ///
@@ -122,11 +124,13 @@ fn read_config(path: &str) -> HashMap<String, Value> {
     match fs::read_to_string(path) {
         Ok(content) => {
             serde_yaml::from_str::<HashMap<String, Value>>(&content).unwrap_or_else(|_| {
+                // Cannot localize these yet, as language has to be loaded from config
                 eprintln!("Failed to parse config file: {}", path);
                 std::process::exit(1);
             })
         }
         Err(_) => {
+            // Cannot localize these yet, as language has to be loaded from config
             eprintln!("Config file not found: {}", path);
             std::process::exit(1);
         }
@@ -139,9 +143,8 @@ fn read_config(path: &str) -> HashMap<String, Value> {
 /// A vector of `Signature` structs containing all loaded signatures.
 ///
 fn load_signatures() -> Vec<Signature> {
-
     /// Process a YAML value to extract signatures.
-    /// 
+    ///
     /// # Arguments
     /// * `val` - The YAML value to process.
     /// * `out` - A mutable reference to the output vector of signatures.
@@ -150,12 +153,19 @@ fn load_signatures() -> Vec<Signature> {
         match val {
             YamlValue::Mapping(map) => {
                 // If there's a "signatures" key with a sequence
-                if let Some(seq) = map.get(&YamlValue::from("signatures")).and_then(|v| v.as_sequence()) {
+                if let Some(seq) = map
+                    .get(&YamlValue::from("signatures"))
+                    .and_then(|v| v.as_sequence())
+                {
                     for item in seq {
                         if let Some(m) = item.as_mapping() {
                             let name = m.get(&YamlValue::from("name")).and_then(|v| v.as_str());
-                            let match_str = m.get(&YamlValue::from("match_")).and_then(|v| v.as_str())
-                                .or_else(|| m.get(&YamlValue::from("match")).and_then(|v| v.as_str()));
+                            let match_str = m
+                                .get(&YamlValue::from("match_"))
+                                .and_then(|v| v.as_str())
+                                .or_else(|| {
+                                    m.get(&YamlValue::from("match")).and_then(|v| v.as_str())
+                                });
                             if let (Some(n), Some(ms)) = (name, match_str) {
                                 out.push(Signature {
                                     name: n.to_string(),
@@ -180,7 +190,9 @@ fn load_signatures() -> Vec<Signature> {
                 for item in seq {
                     if let Some(m) = item.as_mapping() {
                         let name = m.get(&YamlValue::from("name")).and_then(|v| v.as_str());
-                        let match_str = m.get(&YamlValue::from("match_")).and_then(|v| v.as_str())
+                        let match_str = m
+                            .get(&YamlValue::from("match_"))
+                            .and_then(|v| v.as_str())
                             .or_else(|| m.get(&YamlValue::from("match")).and_then(|v| v.as_str()));
                         if let (Some(n), Some(ms)) = (name, match_str) {
                             out.push(Signature {
@@ -196,7 +208,7 @@ fn load_signatures() -> Vec<Signature> {
     }
 
     /// Recursively walk through the directory to find YAML files.
-    /// 
+    ///
     /// # Arguments
     /// * `dir` - The directory path to walk.
     /// * `out` - A mutable reference to the output vector of signatures.
@@ -212,9 +224,19 @@ fn load_signatures() -> Vec<Signature> {
                         match std::fs::read_to_string(&path) {
                             Ok(content) => match serde_yaml::from_str::<YamlValue>(&content) {
                                 Ok(val) => process_value(val, out),
-                                Err(e) => eprintln!("Failed to parse YAML {:?}: {}", path, e),
+                                Err(e) => eprintln!(
+                                    "{}: {:?}: {}",
+                                    localisator::get("error_parse_yaml"),
+                                    path,
+                                    e
+                                ),
                             },
-                            Err(e) => eprintln!("Failed to read file {:?}: {}", path, e),
+                            Err(e) => eprintln!(
+                                "{}: {:?}: {}",
+                                localisator::get("error_read_file"),
+                                path,
+                                e
+                            ),
                         }
                     }
                 }
@@ -225,7 +247,7 @@ fn load_signatures() -> Vec<Signature> {
     let mut results = Vec::new();
     let base = Path::new("signatures");
     if !base.exists() {
-        eprintln!("Signatures directory not found: {:?}", base);
+        eprintln!("{}", localisator::get("error_signatures_dir_not_found"));
         return results;
     }
 
@@ -237,6 +259,7 @@ fn load_signatures() -> Vec<Signature> {
 }
 
 /// Extract and validate configuration parameters.
+///
 /// # Arguments
 /// * `config` - A reference to the configuration HashMap.
 ///
@@ -246,16 +269,21 @@ fn load_signatures() -> Vec<Signature> {
 /// * `u16` - The end port.
 /// * `usize` - The maximum number of threads.
 ///
-fn get_config(
-    config: &HashMap<String, Value>,
-) -> (Arc<IpAddr>, u16, u16, usize) {
+fn get_config(config: &HashMap<String, Value>) -> (Arc<IpAddr>, u16, u16, usize, String) {
+    // Load language early for error messages
+    let language = match config.get("language").and_then(|v| v.as_str()) {
+        Some(lang) => lang.to_string(),
+        None => "en".to_string(),
+    };
+    // Init Localisator early, to provide error messages in the correct language
+    localisator::init(&language);
     let ip: IpAddr = match config.get("ip").and_then(|v| v.as_str()) {
         Some(ip) => ip.parse().unwrap_or_else(|_| {
-            eprintln!("Invalid IP address in config.");
+            eprintln!("{}", localisator::get("error_invalid_ip"));
             std::process::exit(1);
         }),
         None => {
-            eprintln!("IP address not found in config.");
+            eprintln!("{}", localisator::get("error_ip_not_found"));
             std::process::exit(1);
         }
     };
@@ -264,7 +292,9 @@ fn get_config(
     let start_port = match config.get("start_port").and_then(|v| v.as_u64()) {
         Some(port) => {
             if port > 65535 {
-                eprintln!("Start port {} is out of range (1-65535)", port);
+                let msg =
+                    localisator::get("error_start_port_range").replace("{port}", &port.to_string());
+                eprintln!("{}", msg);
                 std::process::exit(1);
             }
             port as u16
@@ -275,7 +305,9 @@ fn get_config(
     let end_port = match config.get("end_port").and_then(|v| v.as_u64()) {
         Some(port) => {
             if port > 65535 {
-                eprintln!("End port {} is out of range (1-65535)", port);
+                let msg =
+                    localisator::get("error_end_port_range").replace("{port}", &port.to_string());
+                eprintln!("{}", msg);
                 std::process::exit(1);
             }
             port as u16
@@ -284,28 +316,32 @@ fn get_config(
     };
 
     if start_port > end_port {
-        eprintln!(
-            "Start port {} cannot be greater than end port {}",
-            start_port, end_port
-        );
+        let msg = localisator::get("error_start_gt_end")
+            .replace("{start}", &start_port.to_string())
+            .replace("{end}", &end_port.to_string());
+        eprintln!("{}", msg);
         std::process::exit(1);
     }
 
     let max_threads = match config.get("max_threads").and_then(|v| v.as_u64()) {
         Some(threads) => {
-            if threads == 0 {
-                eprintln!("Max threads cannot be zero");
+            if threads <= 0 {
+                let msg = localisator::get("error_max_threads_zero")
+                    .replace("{threads}", &threads.to_string());
+                eprintln!("{}", msg);
                 std::process::exit(1);
             }
             if threads > 1000 {
-                eprintln!("Max threads {} is too high (maximum: 1000)", threads);
+                let msg = localisator::get("error_max_threads_high")
+                    .replace("{threads}", &threads.to_string());
+                eprintln!("{}", msg);
                 std::process::exit(1);
             }
             threads as usize
         }
         None => 100,
     };
-    (ip, start_port, end_port, max_threads)
+    (ip, start_port, end_port, max_threads, language)
 }
 
 /// Main function to execute the port scanning logic.
@@ -320,7 +356,7 @@ fn main() {
     };
 
     let config = read_config(config_path);
-    let (ip, start_port, end_port, max_threads) = get_config(&config);
+    let (ip, start_port, end_port, max_threads, _language) = get_config(&config);
     let signatures = Arc::new(load_signatures());
 
     let mut handles = Vec::new();
@@ -344,18 +380,18 @@ fn main() {
     for handle in handles {
         match handle.join() {
             Ok(ports) => open_ports.extend(ports),
-            Err(_) => eprintln!("Thread panicked"),
+            Err(_) => eprintln!("{}", localisator::get("error_thread_panic")),
         }
     }
 
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
-    
+
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
     let log_path = format!("logs/scan_{}.log", timestamp);
     let mut log = match std::fs::File::create(&log_path) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Failed to create log file: {}", e);
+            eprintln!("{}: {}", localisator::get("error_log_file_create"), e);
             return;
         }
     };
@@ -364,39 +400,54 @@ fn main() {
     let scan_duration_str = format_duration(scan_duration);
 
     let header = format!(
-        "Scan started: {}\nPort range: {}-{}\nDuration: {}\nTarget: {}\n",
+        "{} {}\n{} {}-{}\n{} {}\n{} {}\n",
+        localisator::get("scan_started"),
         Local::now().format("%Y-%m-%d %H:%M:%S"),
+        localisator::get("port_range"),
         start_port,
         end_port,
+        localisator::get("duration"),
         scan_duration_str,
+        localisator::get("target"),
         ip_str
     );
     let _ = log.write_all(header.as_bytes());
 
     let open_ports_count = open_ports.len();
     if open_ports_count == 0 {
-        let msg = format!("No open ports found on {}\n", ip_str);
+        let msg = format!("{} {}\n", localisator::get("no_open_ports"), ip_str);
         print!("{}", msg);
         let _ = log.write_all(msg.as_bytes());
         print!(
-            "Scanned ports: {}-{}\nDuration: {}\nOpen ports: 0\n",
-            start_port, end_port, scan_duration_str
+            "{} {}-{}\n{} {}\n{} 0\n",
+            localisator::get("scanned_ports"),
+            start_port,
+            end_port,
+            localisator::get("duration"),
+            scan_duration_str,
+            localisator::get("open_ports_count"),
         );
     } else {
-        let ports_header = format!("Open ports on {}:\n", ip_str);
+        let ports_header = format!("{} {}:\n", localisator::get("open_ports"), ip_str);
         print!("{}", ports_header);
         let _ = log.write_all(ports_header.as_bytes());
         for (port, service) in &open_ports {
             let line = match service {
                 Some(name) => format!("{}: {}\n", port, name),
-                None => format!("{}: open\n", port),
+                None => format!("{}: {}\n", port, localisator::get("open")),
             };
             print!("{}", line);
             let _ = log.write_all(line.as_bytes());
         }
         print!(
-            "Scanned ports: {}-{}\nDuration: {}\nOpen ports: {}\n",
-            start_port, end_port, scan_duration_str, open_ports_count
+            "{} {}-{}\n{} {}\n{} {}\n",
+            localisator::get("scanned_ports"),
+            start_port,
+            end_port,
+            localisator::get("duration"),
+            scan_duration_str,
+            localisator::get("open_ports_count"),
+            open_ports_count
         );
     }
 }
