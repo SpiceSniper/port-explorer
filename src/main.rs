@@ -15,6 +15,7 @@ use serde_yaml::Value;
 use serde_yaml::Value as YamlValue;
 
 use chrono::Local;
+use indicatif::{ProgressBar, ProgressStyle};
 
 mod localisator;
 
@@ -359,19 +360,34 @@ fn main() {
     let (ip, start_port, end_port, max_threads, _language) = get_config(&config);
     let signatures = Arc::new(load_signatures());
 
-    let mut handles = Vec::new();
     let ports: Vec<u16> = (start_port..=end_port).collect();
     let chunk_size = (ports.len() / max_threads) + 1;
+
+    let pb = ProgressBar::new(ports.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
+            .expect(&localisator::get("error_progress_bar_template"))
+            .progress_chars("=>-"),
+    );
+
+    let mut handles = Vec::new();
+    let progress = Arc::new(pb);
 
     for chunk in ports.chunks(chunk_size) {
         let ip = Arc::clone(&ip);
         let chunk = chunk.to_vec();
         let signatures = Arc::clone(&signatures);
+        let progress = Arc::clone(&progress);
         let handle = thread::spawn(move || {
-            chunk
-                .into_iter()
-                .filter_map(|port| scan_port(ip.clone(), port, Arc::clone(&signatures)))
-                .collect::<Vec<(u16, Option<String>)>>()
+            let mut results = Vec::new();
+            for port in chunk {
+                if let Some(res) = scan_port(ip.clone(), port, Arc::clone(&signatures)) {
+                    results.push(res);
+                }
+                progress.inc(1);
+            }
+            results
         });
         handles.push(handle);
     }
@@ -383,6 +399,7 @@ fn main() {
             Err(_) => eprintln!("{}", localisator::get("error_thread_panic")),
         }
     }
+    progress.finish_with_message("Scan complete");
 
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
 

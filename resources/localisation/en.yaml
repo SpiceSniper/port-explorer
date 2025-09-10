@@ -11,6 +11,7 @@ error_log_file_create: "Failed to create log file"
 error_signatures_dir_not_found: "Signatures directory not found"
 error_read_file: "Failed to read file"
 error_parse_yaml: "Failed to parse YAML"
+error_progress_bar_template: "Failed to set progress bar template"
 
 scan_started: "Scan started:"
 port_range: "Port range:"
