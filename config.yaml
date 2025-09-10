@@ -1,4 +1,4 @@
-language: "en"
+language: "de"
 ip: "192.168.0.234"
 start_port: 1
 end_port: 10000

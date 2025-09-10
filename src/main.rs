@@ -434,7 +434,7 @@ fn main() {
         for (port, service) in &open_ports {
             let line = match service {
                 Some(name) => format!("{}: {}\n", port, name),
-                None => format!("{}: open\n", port),
+                None => format!("{}: {}\n", port, localisator::get("open")),
             };
             print!("{}", line);
             let _ = log.write_all(line.as_bytes());
