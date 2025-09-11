@@ -2,7 +2,6 @@ use reqwest::blocking::Client;
 use reqwest::header::USER_AGENT;
 
 use std::collections::HashMap;
-use std::fmt;
 use std::io::Write;
 use std::net::{IpAddr, TcpStream};
 use std::path::Path;
@@ -19,7 +18,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use threadpool::ThreadPool;
 
+mod error;
 mod localisator;
+
+use error::ScanError;
 
 /// Signature structure for service identification
 ///
@@ -33,7 +35,6 @@ struct Signature {
     match_: String,
 }
 
-/// Format a `std::time::Duration` into a human-readable string.
 ///
 /// # Arguments
 /// * `duration` - The duration to format.
@@ -113,32 +114,6 @@ fn scan_port(
         Some((port, None))
     } else {
         None
-    }
-}
-
-/// Custom error type for port explorer
-///
-enum ScanError {
-    Config(String),
-    Io(std::io::Error),
-}
-
-/// Display implementation for ScanError
-///
-impl fmt::Display for ScanError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ScanError::Config(msg) => write!(f, "Config error: {}", msg),
-            ScanError::Io(e) => write!(f, "IO error: {}", e),
-        }
-    }
-}
-
-/// Convert std::io::Error into ScanError
-///
-impl From<std::io::Error> for ScanError {
-    fn from(e: std::io::Error) -> Self {
-        ScanError::Io(e)
     }
 }
 
