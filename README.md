@@ -67,8 +67,9 @@ port-explorer/
 - If you have feature requests, feel free to either open a pull request or an issue
 - New signatures/localization is always welcome
 
-## Issues and further Development
+## Issues and Further Development
 - Some signatures may be inaccurate and may not work yet
+- Testcases need to be expanded to reach 100% coverage and include integration tests
 - Currently no more features are planned, but suggestions are welcome.
 
 ## License
