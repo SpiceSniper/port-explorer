@@ -1,3 +1,4 @@
+
 error_invalid_ip: "Ungültige IP-Adresse in der Konfiguration."
 error_ip_not_found: "IP-Adresse nicht in der Konfiguration gefunden."
 error_start_port_range: "Start-Port {port} ist außerhalb des gültigen Bereichs (1-65535)"
@@ -10,6 +11,7 @@ error_log_file_create: "Fehler beim Erstellen der Log-Datei"
 error_signatures_dir_not_found: "Signaturen-Verzeichnis nicht gefunden"
 error_read_file: "Fehler beim Lesen der Datei"
 error_parse_yaml: "Fehler beim Parsen der YAML-Datei"
+error_progress_bar_template: "Fehler beim Setzen der Vorlage des Fortschrittsbalkens"
 
 scan_started: "Scan gestartet:"
 port_range: "Port-Bereich:"
@@ -20,3 +22,4 @@ open_ports: "Offene Ports auf"
 scanned_ports: "Gescannte Ports:"
 open_ports_count: "Offene Ports:"
 open: "offen"
+scan_complete: "Scan abgeschlossen"
