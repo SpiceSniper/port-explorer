@@ -1,24 +1,32 @@
-mod error;
-mod localisator;
 mod config;
+#[cfg(test)]
+mod config_test;
+mod error;
+#[cfg(test)]
+mod error_test;
+mod localisator;
+#[cfg(test)]
+mod localisator_test;
 mod signatures;
+#[cfg(test)]
+mod signatures_test;
 
-use std::sync::Arc;
-use std::net::{IpAddr, TcpStream};
-use indicatif::{ProgressBar, ProgressStyle};
-use threadpool::ThreadPool;
 use chrono::Local;
+use error::ScanError;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::Client;
 use reqwest::header::USER_AGENT;
+use signatures::{identify_service, load_signatures, Signature};
 use std::io::Write;
-use error::ScanError;
-use signatures::{Signature, identify_service, load_signatures};
+use std::net::{IpAddr, TcpStream};
+use std::sync::Arc;
+use threadpool::ThreadPool;
 
 /// Format a duration into a human-readable string.
 ///
 /// # Arguments
 /// * `duration` - The duration to format.
-/// 
+///
 /// Returns
 /// * A formatted string representing the duration in the largest appropriate units.
 ///
@@ -53,7 +61,7 @@ fn format_duration(duration: std::time::Duration) -> String {
 /// # Returns
 /// * `Some((u16, Option<String>))` - If the port is open and a service is identified.
 /// * `None` - If the port is closed or no service is identified.
-/// 
+///
 fn scan_port(
     ip: Arc<IpAddr>,
     port: u16,
@@ -80,7 +88,7 @@ fn scan_port(
 }
 
 /// Scan multiple ports in parallel using a thread pool.
-/// 
+///
 /// # Arguments
 /// * `ip` - An Arc-wrapped IpAddr to scan.
 /// * `ports` - A vector of port numbers to scan.
@@ -91,7 +99,7 @@ fn scan_port(
 /// # Returns
 /// * `Ok(Vec<(u16, Option<String>)>)` - A vector of open ports and their identified services.
 /// * `Err(ScanError)` - If an error occurs during scanning.
-/// 
+///
 fn scan_ports_parallel(
     ip: Arc<IpAddr>,
     ports: Vec<u16>,
@@ -154,13 +162,14 @@ fn main() {
             .expect(&localisator::get("error_progress_bar_template"))
             .progress_chars("=>-")
     );
-    let open_ports = match scan_ports_parallel(ip.clone(), ports, signatures.clone(), max_threads, &pb) {
-        Ok(ports) => ports,
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
-        }
-    };
+    let open_ports =
+        match scan_ports_parallel(ip.clone(), ports, signatures.clone(), max_threads, &pb) {
+            Ok(ports) => ports,
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        };
     pb.finish_with_message(localisator::get("scan_complete"));
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");

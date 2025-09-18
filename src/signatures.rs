@@ -1,14 +1,14 @@
+use crate::error::ScanError;
 use serde::Deserialize;
 use serde_yaml::Value as YamlValue;
 use std::path::Path;
-use crate::error::ScanError;
 
 /// Represents a service signature with a name and a matching string.
 ///
 /// # Fields
 /// * `name` - The name of the service (e.g., "HTTP", "FTP").
 /// * `match_` - A substring to match in the response to identify the service
-/// 
+///
 #[derive(Debug, Deserialize, Clone)]
 pub struct Signature {
     pub name: String,
@@ -16,7 +16,7 @@ pub struct Signature {
 }
 
 /// Identify the service based on response content and known signatures.
-/// 
+///
 /// # Arguments
 /// * `response` - The response string from the scanned port.
 /// * `signatures` - A slice of known service signatures.
@@ -24,7 +24,7 @@ pub struct Signature {
 /// # Returns
 /// * `Some(String)` - The name of the identified service, if a matching signature is found.
 /// * `None` - If no matching signature is found.
-/// 
+///
 pub fn identify_service(response: &str, signatures: &[Signature]) -> Option<String> {
     for sig in signatures {
         if response.contains(&sig.match_) {
@@ -35,7 +35,7 @@ pub fn identify_service(response: &str, signatures: &[Signature]) -> Option<Stri
 }
 
 /// Load signatures from YAML files in the "signatures" directory and its subdirectories.
-/// 
+///
 /// Returns
 /// * `Ok(Vec<Signature>)` - A vector of loaded signatures.
 /// * `Err(ScanError)` - If there was an error reading or parsing the signature files.
@@ -43,11 +43,10 @@ pub fn identify_service(response: &str, signatures: &[Signature]) -> Option<Stri
 /// Returns
 /// * `Ok(Vec<Signature>)` - A vector of loaded signatures.
 /// * `Err(ScanError)` - If there was an error reading or parsing the signature files.
-/// 
+///
 pub fn load_signatures() -> Result<Vec<Signature>, ScanError> {
-
     /// Check if a file has a .yml or .yaml extension.
-    /// 
+    ///
     /// # Arguments
     /// * `path` - A reference to a Path to check.
     ///
@@ -63,14 +62,14 @@ pub fn load_signatures() -> Result<Vec<Signature>, ScanError> {
     }
 
     /// Extract a Signature from a YAML mapping.
-    /// 
+    ///
     /// # Arguments
     /// * `m` - A reference to a serde_yaml::Mapping representing a signature.
     ///
     /// # Returns
     /// * `Some(Signature)` - If the mapping contains valid fields.
     /// * `None` - If the mapping is missing required fields.
-    /// 
+    ///
     fn extract_signature_from_mapping(m: &serde_yaml::Mapping) -> Option<Signature> {
         let name = m.get(&YamlValue::from("name")).and_then(|v| v.as_str());
         let match_str = m
@@ -88,14 +87,14 @@ pub fn load_signatures() -> Result<Vec<Signature>, ScanError> {
     }
 
     /// Process a YAML mapping to extract signatures.
-    /// 
+    ///
     /// # Arguments
     /// * `map` - A reference to a serde_yaml::Mapping.
     /// * `out` - A mutable reference to a vector to collect signatures.
     ///
     /// # Returns
     /// * `None` - If the mapping is missing the "signatures" key.
-    /// 
+    ///
     fn process_mapping(map: &serde_yaml::Mapping, out: &mut Vec<Signature>) {
         if let Some(seq) = map
             .get(&YamlValue::from("signatures"))
@@ -123,11 +122,11 @@ pub fn load_signatures() -> Result<Vec<Signature>, ScanError> {
     }
 
     /// Process a YAML sequence to extract signatures.
-    /// 
+    ///
     /// # Arguments
     /// * `seq` - A reference to a vector of YamlValue.
     /// * `out` - A mutable reference to a vector to collect signatures.
-    /// 
+    ///
     /// # Returns
     /// * `None` - If the sequence is empty or contains no valid mappings.
     ///
@@ -142,7 +141,7 @@ pub fn load_signatures() -> Result<Vec<Signature>, ScanError> {
     }
 
     /// Recursively process a YAML value to extract signatures.
-    /// 
+    ///
     /// # Arguments
     /// * `val` - A reference to a YamlValue.
     /// * `out` - A mutable reference to a vector to collect signatures.
@@ -175,7 +174,7 @@ pub fn load_signatures() -> Result<Vec<Signature>, ScanError> {
     }
 
     /// Load signatures from a YAML file and append them to the output vector.
-    /// 
+    ///
     /// # Arguments
     /// * `path` - A reference to a Path of the YAML file.
     /// * `out` - A mutable reference to a vector to collect signatures.
@@ -204,7 +203,7 @@ pub fn load_signatures() -> Result<Vec<Signature>, ScanError> {
     }
 
     /// Recursively collect signatures from a directory and its subdirectories.
-    /// 
+    ///
     /// # Arguments
     /// * `dir` - A reference to a Path of the directory.
     /// * `out` - A mutable reference to a vector to collect signatures.

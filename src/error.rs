@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// Custom error type for port explorer
-/// 
+///
 #[derive(Debug)]
 pub enum ScanError {
     Config(String),
