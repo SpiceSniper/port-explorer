@@ -8,6 +8,7 @@ error_max_threads_zero: "Maximale Thread-Anzahl {threads} kann nicht null oder k
 error_max_threads_high: "Maximale Thread-Anzahl {threads} ist zu hoch (Maximum: 1000)"
 error_thread_panic: "Thread ist abgestürzt"
 error_log_file_create: "Fehler beim Erstellen der Log-Datei"
+error_log_dir_create: "Fehler beim Erstellen des Log-Verzeichnisses"
 error_signatures_dir_not_found: "Signaturen-Verzeichnis nicht gefunden"
 error_read_file: "Fehler beim Lesen der Datei"
 error_parse_yaml: "Fehler beim Parsen der YAML-Datei"
