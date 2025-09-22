@@ -56,6 +56,7 @@ fn test_load_signatures_valid_and_invalid_files() {
     match: SMTP
   - name: SSH
     match: SSH";
+  
     fs::write(signatures_dir.join("valid.yaml"), valid).unwrap();
     
     // Invalid YAML file

@@ -223,8 +223,15 @@ fn main() {
     pb.finish_with_message(localisator::get("scan_complete"));
     let ip_str = config.get("ip").and_then(|v| v.as_str()).unwrap_or("");
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-    let log_path = format!("logs/scan_{}.log", timestamp);
-    let mut log = match std::fs::File::create(&log_path) {
+    
+    let log_path = "logs";
+    if let Err(e) = std::fs::create_dir_all(log_path) {
+        eprintln!("{}: {}", localisator::get("error_log_dir_create"), e);
+        return;
+    }
+    
+    let log_file_path = std::path::Path::new(log_path).join(format!("scan_{}.log", timestamp));
+    let mut log = match std::fs::File::create(&log_file_path) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("{}: {}", localisator::get("error_log_file_create"), e);
