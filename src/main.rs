@@ -11,6 +11,8 @@ mod localisator_test;
 mod signatures;
 #[cfg(test)]
 mod signatures_test;
+#[cfg(test)]
+mod main_test;
 
 use chrono::Local;
 use error::ScanError;
