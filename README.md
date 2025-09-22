@@ -33,6 +33,8 @@ Edit `config.yaml` (or a config file of your choice) to set scan parameters:
 
 Signatures for service identification are in `signatures/` (YAML files). You can add new yaml files and subfolders into the `signatures/` folder, as it gets parsed recursively. 
 
+Alternatively, all config values can be passed as commandline arguments, which then overwrite their respective config file arguments. Arguments can be used like this: `./target/release/port-explorer --argument <value>`.
+
 
 ## Usage
 - Run a scan: `./target/release/port-explorer <config_path>`
