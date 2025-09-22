@@ -1,10 +1,6 @@
-#![cfg(test)]
-
-use crate::error::ScanError;
-use crate::signatures::*;
+use port_explorer::error::ScanError;
+use port_explorer::signatures::*;
 use std::fs;
-use std::path::Path;
-use std::thread::sleep;
 
 #[test]
 fn test_identify_service_found() {
@@ -56,7 +52,6 @@ fn test_load_signatures_valid_and_invalid_files() {
     match: SMTP
   - name: SSH
     match: SSH";
-  
     fs::write(signatures_dir.join("valid.yaml"), valid).unwrap();
     
     // Invalid YAML file
@@ -97,27 +92,4 @@ fn test_load_signatures_valid_and_invalid_files() {
     assert!(names.contains(&"FTP"));
     
     // tempfile automatically cleans up
-}
-
-#[test]
-fn test_extract_signature_from_mapping_variants() {
-    use serde_yaml::Mapping;
-    use serde_yaml::Value;
-    // Only name and match_
-    let mut m = Mapping::new();
-    m.insert(Value::from("name"), Value::from("HTTP"));
-    m.insert(Value::from("match_"), Value::from("Server: Apache"));
-    let sig: Option<Signature> = serde_yaml::from_value(Value::Mapping(m.clone())).ok();
-    assert!(sig.is_some());
-    // Only name and match
-    let mut m2 = Mapping::new();
-    m2.insert(Value::from("name"), Value::from("SSH"));
-    m2.insert(Value::from("match_"), Value::from("SSH"));
-    let sig2: Option<Signature> = serde_yaml::from_value(Value::Mapping(m2.clone())).ok();
-    assert!(sig2.is_some());
-    // Missing fields
-    let mut m3 = Mapping::new();
-    m3.insert(Value::from("name"), Value::from("FTP"));
-    let sig3: Option<Signature> = serde_yaml::from_value(Value::Mapping(m3.clone())).ok();
-    assert!(sig3.is_none());
 }

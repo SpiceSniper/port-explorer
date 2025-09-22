@@ -1,6 +1,4 @@
-#![cfg(test)]
-
-use crate::error::ScanError;
+use port_explorer::error::ScanError;
 use std::io;
 
 #[test]
