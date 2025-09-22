@@ -1,6 +1,4 @@
-#![cfg(test)]
-
-use crate::localisator;
+use port_explorer::localisator;
 use std::fs;
 
 #[test]

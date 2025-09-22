@@ -1,7 +1,5 @@
-#![cfg(test)]
-
 // Unit tests for config parsing
-use crate::config;
+use port_explorer::config;
 use serde_yaml::Value as YamlValue;
 use std::collections::HashMap;
 
