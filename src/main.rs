@@ -1,3 +1,4 @@
+use clap::Parser;
 mod config;
 #[cfg(test)]
 mod config_test;
@@ -21,6 +22,39 @@ use std::io::Write;
 use std::net::{IpAddr, TcpStream};
 use std::sync::Arc;
 use threadpool::ThreadPool;
+
+/// Command-line arguments for Port Explorer
+/// 
+/// Fields:
+/// * `ip` - Target IP address (e.g., "192.168.1
+/// * `start_port` - Starting port number (e.g., 1)
+/// * `end_port` - Ending port number (e.g., 65535)
+/// * `max_threads` - Maximum number of threads to use (e.g., 100)
+/// * `language` - Language code for localization (e.g., "en", "es")
+/// 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Target IP address
+    #[arg(long)]
+    ip: Option<String>,
+
+    /// Start port
+    #[arg(long)]
+    start_port: Option<u16>,
+
+    /// End port
+    #[arg(long)]
+    end_port: Option<u16>,
+
+    /// Max threads
+    #[arg(long)]
+    max_threads: Option<usize>,
+
+    /// Language
+    #[arg(long)]
+    language: Option<String>,
+}
 
 /// Format a duration into a human-readable string.
 ///
@@ -131,15 +165,29 @@ fn scan_ports_parallel(
 /// The main entry point of the application.
 ///
 fn main() {
+    let args = Args::parse();
     let scan_start = std::time::Instant::now();
     let config_path = "config.yaml";
-    let config = match config::read_config(config_path) {
+    let mut config = match config::read_config(config_path) {
         Ok(cfg) => cfg,
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(1);
-        }
+        Err(_) => std::collections::HashMap::new(),
     };
+    // Override config with CLI args if provided
+    if let Some(ip) = &args.ip {
+        config.insert("ip".to_string(), serde_yaml::Value::String(ip.clone()));
+    }
+    if let Some(start_port) = args.start_port {
+        config.insert("start_port".to_string(), serde_yaml::Value::Number(start_port.into()));
+    }
+    if let Some(end_port) = args.end_port {
+        config.insert("end_port".to_string(), serde_yaml::Value::Number(end_port.into()));
+    }
+    if let Some(max_threads) = args.max_threads {
+        config.insert("max_threads".to_string(), serde_yaml::Value::Number((max_threads as u64).into()));
+    }
+    if let Some(language) = &args.language {
+        config.insert("language".to_string(), serde_yaml::Value::String(language.clone()));
+    }
     let (ip, start_port, end_port, max_threads, _language) = match config::get_config(&config) {
         Ok(vals) => vals,
         Err(e) => {
